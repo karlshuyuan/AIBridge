@@ -2,8 +2,8 @@
 name: aibridge
 description: "Unity CLI 工具。执行编译、资源搜索、游戏对象操作、变换操作、组件检查、场景/预制体管理、截图捕获和 GIF 录制。支持多命令执行、运行时扩展和脚本自动化。"
 commands: [compile, asset, gameobject, transform, inspector, selection, scene, prefab, screenshot, gameview, get_logs, focus, batch, multi, menu_item, editor, script]
-capabilities: [asset-lookup, scene-editing, build-automation, visual-verification, component-inspection, hierarchy-manipulation, prefab-management, console-monitoring, editor-control, script-automation]
-triggers: [unity, compile, gameobject, transform, component, scene, prefab, screenshot, gif, console, log, asset, hierarchy, inspector, selection, menu, editor, focus, batch, gameview, resolution, script, automation]
+capabilities: [asset-lookup, scene-editing, build-automation, visual-verification, component-inspection, serialized-property-editing, prefab-asset-editing, component-field-editing, hierarchy-manipulation, prefab-management, console-monitoring, editor-control, script-automation]
+triggers: [unity, compile, gameobject, transform, component, serializedproperty, property, scene, prefab, screenshot, gif, console, log, asset, hierarchy, inspector, selection, menu, editor, focus, batch, gameview, resolution, script, automation]
 ---
 
 # AI Bridge Unity Skill
@@ -21,6 +21,12 @@ triggers: [unity, compile, gameobject, transform, component, scene, prefab, scre
 4. Host AI native file-read tool (for file contents)
 5. `asset read_text` (fallback when native reads unavailable)
 6. Generic grep/filesystem search (last resort)
+
+**Serialized Property Editing Priority:**
+1. Use `inspector get_components/get_properties/find_property` to discover target Component and SerializedProperty paths
+2. Use `inspector set_property/set_properties` for scene objects, prefab assets, and ScriptableObject-like assets
+3. For prefab assets, pass `assetPath + objectPath + componentName`; AIBridge edits via Unity PrefabUtility, not raw text
+4. Avoid direct YAML edits unless there is no Unity serialization API path; YAML changes must be reviewed with a dry-run diff first
 
 **Special Constraints:**
 - `focus` - Windows-only, CLI-only, triggers Unity refresh/compile

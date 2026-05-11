@@ -120,7 +120,7 @@ namespace AIBridge.Editor
                 case "TransformCommand":
                     return "Transform operations: position, rotation, scale, parent";
                 case "InspectorCommand":
-                    return "Inspector operations: get/set properties, add/remove components";
+                    return "Inspector operations: get/set SerializedProperty values on scene objects, prefab assets, and assets";
                 case "PrefabCommand":
                     return "Prefab operations: instantiate, save, unpack, apply";
                 case "BatchCommand":
@@ -178,6 +178,26 @@ namespace AIBridge.Editor
                     return new
                     {
                         get_components = new { type = "inspector", @params = new { action = "get_components", path = "Main Camera" } },
+                        get_prefab_components = new { type = "inspector", @params = new { action = "get_components", assetPath = "Assets/UI/LoginPanel.prefab", objectPath = "Root/Button" } },
+                        find_rect_transform_property = new { type = "inspector", @params = new { action = "find_property", assetPath = "Assets/UI/LoginPanel.prefab", objectPath = "Root/Button", componentName = "RectTransform", keyword = "AnchoredPosition" } },
+                        set_prefab_rect_transform_x = new { type = "inspector", @params = new { action = "set_property", assetPath = "Assets/UI/LoginPanel.prefab", objectPath = "Root/Button", componentName = "RectTransform", propertyName = "m_AnchoredPosition.x", value = 100 } },
+                        set_multiple_prefab_values = new
+                        {
+                            type = "inspector",
+                            @params = new
+                            {
+                                action = "set_properties",
+                                assetPath = "Assets/UI/LoginPanel.prefab",
+                                objectPath = "Root/Button",
+                                componentName = "RectTransform",
+                                values = new Dictionary<string, object>
+                                {
+                                    { "m_AnchoredPosition.x", 100 },
+                                    { "m_AnchoredPosition.y", -40 },
+                                    { "m_LocalPosition.z", 0 }
+                                }
+                            }
+                        },
                         add_component = new { type = "inspector", @params = new { action = "add_component", path = "Main Camera", typeName = "AudioListener" } }
                     };
 
