@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using UnityEditor;
 
 namespace AIBridge.Editor
 {
@@ -40,103 +41,266 @@ $CLI get_logs [--count 100] [--logType Error|Warning]
 
         private List<LogEntry> GetConsoleLogs(int maxCount, string logTypeFilter)
         {
+#if UNITY_2020_1_OR_NEWER
+            return GetConsoleLogsForModernUnity(maxCount, logTypeFilter);
+#else
+            return GetConsoleLogsForUnity2019(maxCount, logTypeFilter);
+#endif
+        }
+
+        private List<LogEntry> GetConsoleLogsForModernUnity(int maxCount, string logTypeFilter)
+        {
+            try
+            {
+                var consoleReflection = ResolveConsoleReflectionForModernUnity();
+                return ReadConsoleLogs(consoleReflection, maxCount, logTypeFilter);
+            }
+            catch (Exception ex)
+            {
+                AIBridgeLogger.LogError("Failed to get console logs for modern Unity: " + ex.Message);
+                return new List<LogEntry>();
+            }
+        }
+
+        private List<LogEntry> GetConsoleLogsForUnity2019(int maxCount, string logTypeFilter)
+        {
+            try
+            {
+                var consoleReflection = ResolveConsoleReflectionForUnity2019();
+                return ReadConsoleLogs(consoleReflection, maxCount, logTypeFilter);
+            }
+            catch (Exception ex)
+            {
+                AIBridgeLogger.LogError("Failed to get console logs for Unity 2019: " + ex.Message);
+                return new List<LogEntry>();
+            }
+        }
+
+        private List<LogEntry> ReadConsoleLogs(ConsoleReflection consoleReflection, int maxCount, string logTypeFilter)
+        {
             var logs = new List<LogEntry>();
+            if (consoleReflection == null)
+            {
+                return logs;
+            }
 
             try
             {
-                // Use reflection to access internal LogEntries class
-                var logEntriesType = System.Type.GetType("UnityEditor.LogEntries, UnityEditor");
-                if (logEntriesType == null)
+                var totalCount = (int)consoleReflection.GetCountMethod.Invoke(null, null);
+                if (totalCount <= 0)
                 {
                     return logs;
                 }
 
-                // Get log count
-                var getCountMethod = logEntriesType.GetMethod("GetCount", BindingFlags.Public | BindingFlags.Static);
-                if (getCountMethod == null)
-                {
-                    return logs;
-                }
-
-                var totalCount = (int)getCountMethod.Invoke(null, null);
-                if (totalCount == 0)
-                {
-                    return logs;
-                }
-
-                // Start getting entries
-                var startMethod = logEntriesType.GetMethod("StartGettingEntries", BindingFlags.Public | BindingFlags.Static);
-                var endMethod = logEntriesType.GetMethod("EndGettingEntries", BindingFlags.Public | BindingFlags.Static);
-                var getEntryMethod = logEntriesType.GetMethod("GetEntryInternal", BindingFlags.Public | BindingFlags.Static);
-
-                if (startMethod == null || endMethod == null || getEntryMethod == null)
-                {
-                    return logs;
-                }
-
-                // Get LogEntry type
-                var logEntryType = System.Type.GetType("UnityEditor.LogEntry, UnityEditor");
-                if (logEntryType == null)
-                {
-                    return logs;
-                }
-
-                startMethod.Invoke(null, null);
+                consoleReflection.StartGettingEntriesMethod.Invoke(null, null);
 
                 try
                 {
                     var startIndex = Math.Max(0, totalCount - maxCount);
                     for (var i = startIndex; i < totalCount; i++)
                     {
-                        var entry = Activator.CreateInstance(logEntryType);
-                        var success = (bool)getEntryMethod.Invoke(null, new object[] { i, entry });
-
-                        if (success)
+                        var entry = Activator.CreateInstance(consoleReflection.LogEntryType);
+                        var success = (bool)consoleReflection.GetEntryInternalMethod.Invoke(null, new object[] { i, entry });
+                        if (!success)
                         {
-                            var message = (string)logEntryType.GetField("message", BindingFlags.Public | BindingFlags.Instance)?.GetValue(entry);
-                            var mode = (int)(logEntryType.GetField("mode", BindingFlags.Public | BindingFlags.Instance)?.GetValue(entry) ?? 0);
-
-                            var entryType = GetLogType(mode);
-
-                            // Filter by log type
-                            if (logTypeFilter != "all" && entryType.ToLower() != logTypeFilter.ToLower())
-                            {
-                                continue;
-                            }
-
-                            logs.Add(new LogEntry
-                            {
-                                message = message,
-                                type = entryType
-                            });
+                            continue;
                         }
+
+                        var message = GetLogMessage(consoleReflection, entry);
+                        var mode = GetLogMode(consoleReflection, entry);
+                        var normalizedType = NormalizeLogType(mode);
+
+                        if (!ShouldIncludeLog(logTypeFilter, normalizedType))
+                        {
+                            continue;
+                        }
+
+                        logs.Add(new LogEntry
+                        {
+                            message = message,
+                            type = normalizedType
+                        });
                     }
                 }
                 finally
                 {
-                    endMethod.Invoke(null, null);
+                    consoleReflection.EndGettingEntriesMethod.Invoke(null, null);
                 }
             }
             catch (Exception ex)
             {
-                AIBridgeLogger.LogError($"Failed to get console logs: {ex.Message}");
+                AIBridgeLogger.LogError("Failed to read Unity console logs: " + ex.Message);
             }
 
             return logs;
         }
 
-        private string GetLogType(int mode)
+        private ConsoleReflection ResolveConsoleReflectionForModernUnity()
         {
-            // Mode flags for log types
-            if ((mode & (1 << 0)) != 0) return "Error";
-            if ((mode & (1 << 1)) != 0) return "Assert";
-            if ((mode & (1 << 2)) != 0) return "Log";
-            if ((mode & (1 << 3)) != 0) return "Fatal";
-            if ((mode & (1 << 4)) != 0) return "DontPreprocess";
-            if ((mode & (1 << 7)) != 0) return "ScriptingError";
-            if ((mode & (1 << 8)) != 0) return "ScriptingWarning";
-            if ((mode & (1 << 9)) != 0) return "ScriptingLog";
-            if ((mode & (1 << 11)) != 0) return "Warning";
+            var editorAssembly = Assembly.GetAssembly(typeof(UnityEditor.Editor));
+            if (editorAssembly == null)
+            {
+                AIBridgeLogger.LogError("Failed to resolve UnityEditor assembly for get_logs.");
+                return null;
+            }
+
+            var logEntriesType = editorAssembly.GetType("UnityEditor.LogEntries");
+            var logEntryType = editorAssembly.GetType("UnityEditor.LogEntry");
+            if (logEntriesType == null || logEntryType == null)
+            {
+                AIBridgeLogger.LogError("Failed to resolve modern Unity console reflection types for get_logs.");
+                return null;
+            }
+
+            var methodFlags = BindingFlags.Public | BindingFlags.Static;
+            var fieldFlags = BindingFlags.Public | BindingFlags.Instance;
+            return BuildConsoleReflection(logEntriesType, logEntryType, methodFlags, fieldFlags, "message", "condition");
+        }
+
+        private ConsoleReflection ResolveConsoleReflectionForUnity2019()
+        {
+            var editorAssembly = Assembly.GetAssembly(typeof(UnityEditor.Editor));
+            if (editorAssembly == null)
+            {
+                AIBridgeLogger.LogError("Failed to resolve UnityEditor assembly for get_logs.");
+                return null;
+            }
+
+            var logEntriesType = ResolveType(editorAssembly, "UnityEditorInternal.LogEntries", "UnityEditor.LogEntries");
+            var logEntryType = ResolveType(editorAssembly, "UnityEditorInternal.LogEntry", "UnityEditor.LogEntry");
+            if (logEntriesType == null || logEntryType == null)
+            {
+                AIBridgeLogger.LogError("Failed to resolve Unity 2019 console reflection types for get_logs.");
+                return null;
+            }
+
+            var methodFlags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static;
+            var fieldFlags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+            return BuildConsoleReflection(logEntriesType, logEntryType, methodFlags, fieldFlags, "condition", "message");
+        }
+
+        private ConsoleReflection BuildConsoleReflection(
+            Type logEntriesType,
+            Type logEntryType,
+            BindingFlags methodFlags,
+            BindingFlags fieldFlags,
+            string primaryMessageFieldName,
+            string fallbackMessageFieldName)
+        {
+            var getCountMethod = logEntriesType.GetMethod("GetCount", methodFlags);
+            var startGettingEntriesMethod = logEntriesType.GetMethod("StartGettingEntries", methodFlags);
+            var endGettingEntriesMethod = logEntriesType.GetMethod("EndGettingEntries", methodFlags);
+            var getEntryInternalMethod = logEntriesType.GetMethod("GetEntryInternal", methodFlags);
+
+            if (getCountMethod == null ||
+                startGettingEntriesMethod == null ||
+                endGettingEntriesMethod == null ||
+                getEntryInternalMethod == null)
+            {
+                AIBridgeLogger.LogError("Failed to resolve Unity console reflection methods for get_logs.");
+                return null;
+            }
+
+            var primaryMessageField = logEntryType.GetField(primaryMessageFieldName, fieldFlags);
+            var fallbackMessageField = logEntryType.GetField(fallbackMessageFieldName, fieldFlags);
+            var modeField = logEntryType.GetField("mode", fieldFlags);
+
+            if (modeField == null)
+            {
+                AIBridgeLogger.LogError("Failed to resolve Unity console mode field for get_logs.");
+                return null;
+            }
+
+            if (primaryMessageField == null && fallbackMessageField == null)
+            {
+                AIBridgeLogger.LogError("Failed to resolve Unity console message fields for get_logs.");
+                return null;
+            }
+
+            return new ConsoleReflection
+            {
+                LogEntryType = logEntryType,
+                GetCountMethod = getCountMethod,
+                StartGettingEntriesMethod = startGettingEntriesMethod,
+                EndGettingEntriesMethod = endGettingEntriesMethod,
+                GetEntryInternalMethod = getEntryInternalMethod,
+                PrimaryMessageField = primaryMessageField,
+                FallbackMessageField = fallbackMessageField,
+                ModeField = modeField
+            };
+        }
+
+        private Type ResolveType(Assembly assembly, params string[] typeNames)
+        {
+            for (var i = 0; i < typeNames.Length; i++)
+            {
+                var resolvedType = assembly.GetType(typeNames[i]);
+                if (resolvedType != null)
+                {
+                    return resolvedType;
+                }
+            }
+
+            return null;
+        }
+
+        private string GetLogMessage(ConsoleReflection consoleReflection, object entry)
+        {
+            // 2019.4 优先读 condition，缺失或为空再退回 message；高版本则优先读 message。
+            var primaryMessage = GetStringFieldValue(consoleReflection.PrimaryMessageField, entry);
+            if (!string.IsNullOrEmpty(primaryMessage))
+            {
+                return primaryMessage;
+            }
+
+            var fallbackMessage = GetStringFieldValue(consoleReflection.FallbackMessageField, entry);
+            return fallbackMessage ?? string.Empty;
+        }
+
+        private string GetStringFieldValue(FieldInfo fieldInfo, object entry)
+        {
+            if (fieldInfo == null)
+            {
+                return null;
+            }
+
+            return fieldInfo.GetValue(entry) as string;
+        }
+
+        private int GetLogMode(ConsoleReflection consoleReflection, object entry)
+        {
+            var modeValue = consoleReflection.ModeField.GetValue(entry);
+            if (modeValue is int intMode)
+            {
+                return intMode;
+            }
+
+            return 0;
+        }
+
+        private bool ShouldIncludeLog(string logTypeFilter, string entryType)
+        {
+            if (string.IsNullOrEmpty(logTypeFilter) || string.Equals(logTypeFilter, "all", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            return string.Equals(entryType, logTypeFilter, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private string NormalizeLogType(int mode)
+        {
+            var flags = (KnownLogMessageFlags)mode;
+
+            if ((flags & ErrorLogMask) != 0)
+            {
+                return "Error";
+            }
+
+            if ((flags & WarningLogMask) != 0)
+            {
+                return "Warning";
+            }
 
             return "Log";
         }
@@ -147,5 +311,57 @@ $CLI get_logs [--count 100] [--logType Error|Warning]
             public string message;
             public string type;
         }
+
+        /// <summary>
+        /// 缓存一次 Console 反射所需的类型、方法和字段，避免版本分支逻辑污染主流程。
+        /// </summary>
+        private class ConsoleReflection
+        {
+            public Type LogEntryType;
+            public MethodInfo GetCountMethod;
+            public MethodInfo StartGettingEntriesMethod;
+            public MethodInfo EndGettingEntriesMethod;
+            public MethodInfo GetEntryInternalMethod;
+            public FieldInfo PrimaryMessageField;
+            public FieldInfo FallbackMessageField;
+            public FieldInfo ModeField;
+        }
+
+        /// <summary>
+        /// 对齐 Unity 官方 LogMessageFlags，仅用于业务归类，不暴露内部位标志细节。
+        /// </summary>
+        [Flags]
+        private enum KnownLogMessageFlags
+        {
+            None = 0,
+            Error = 1 << 0,
+            Assert = 1 << 1,
+            Log = 1 << 2,
+            Fatal = 1 << 4,
+            AssetImportError = 1 << 6,
+            AssetImportWarning = 1 << 7,
+            ScriptingError = 1 << 8,
+            ScriptingWarning = 1 << 9,
+            ScriptingLog = 1 << 10,
+            ScriptCompileError = 1 << 11,
+            ScriptCompileWarning = 1 << 12,
+            ScriptingException = 1 << 17,
+            ScriptingAssertion = 1 << 21
+        }
+
+        private const KnownLogMessageFlags ErrorLogMask =
+            KnownLogMessageFlags.Error |
+            KnownLogMessageFlags.Assert |
+            KnownLogMessageFlags.Fatal |
+            KnownLogMessageFlags.AssetImportError |
+            KnownLogMessageFlags.ScriptingError |
+            KnownLogMessageFlags.ScriptCompileError |
+            KnownLogMessageFlags.ScriptingAssertion |
+            KnownLogMessageFlags.ScriptingException;
+
+        private const KnownLogMessageFlags WarningLogMask =
+            KnownLogMessageFlags.AssetImportWarning |
+            KnownLogMessageFlags.ScriptingWarning |
+            KnownLogMessageFlags.ScriptCompileWarning;
     }
 }
