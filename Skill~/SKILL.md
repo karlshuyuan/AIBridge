@@ -62,7 +62,7 @@ $CLI multi --stdin  # Read from stdin (one per line)
 
 ### `aibridge-prefab-patch` - Complex Prefab Asset Edits
 
-Use the separate `aibridge-prefab-patch` skill for complex prefab changes that need child creation, component creation, internal references, arrays, or ReferenceCollector updates.
+Use the separate `aibridge-prefab-patch` skill for complex prefab changes that need child creation, component creation, internal references, or serialized array edits.
 
 <!-- AIBRIDGE:COMMANDS -->
 

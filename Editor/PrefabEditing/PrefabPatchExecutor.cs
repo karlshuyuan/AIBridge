@@ -142,9 +142,6 @@ namespace AIBridge.Editor
                 case "clear_array":
                     ClearArray(context, operation, index, op);
                     break;
-                case "set_reference_collector":
-                    SetReferenceCollector(context, operation, index, op);
-                    break;
                 default:
                     throw new PatchException($"Operation #{index + 1} has unsupported op: {op}");
             }
@@ -237,16 +234,6 @@ namespace AIBridge.Editor
 
             var changed = WriteProperties(context, target.TargetObject, propertyValues);
             AddResult(context, index, op, target.Path, changed, propertyValues.Count + " properties");
-        }
-
-        private static void SetReferenceCollector(PatchContext context, IDictionary operation, int index, string op)
-        {
-            if (string.IsNullOrEmpty(GetString(operation, "propertyName")))
-            {
-                operation["propertyName"] = "data";
-            }
-
-            SetArray(context, operation, index, op);
         }
 
         private static void SetArray(PatchContext context, IDictionary operation, int index, string op)

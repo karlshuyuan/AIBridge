@@ -1,6 +1,6 @@
 ---
 name: aibridge-prefab-patch
-description: Unity Prefab asset patch workflow for AIBridge. Use when modifying complex prefab assets with prefab patch operations, child or component creation, SerializedProperty writes, array edits, internal GameObject/component references, ReferenceCollector updates, dry-run validation, or when deciding between prefab patch, inspector set_property, and scene object commands.
+description: Unity Prefab asset patch workflow for AIBridge. Use when modifying complex prefab assets with prefab patch operations, child or component creation, SerializedProperty writes, array edits, internal GameObject/component references, dry-run validation, or when deciding between prefab patch, inspector set_property, and scene object commands.
 ---
 
 # AIBridge Prefab Patch
@@ -41,8 +41,9 @@ Use `prefab patch` for complex Prefab asset edits that need multiple operations 
     "value": true
   },
   {
-    "op": "set_reference_collector",
-    "target": { "path": "Player", "componentName": "ReferenceCollector" },
+    "op": "set_array",
+    "target": { "path": "Player", "componentName": "YourComponent" },
+    "propertyName": "items",
     "items": [
       { "key": "HP", "value": { "$gameObject": "Player/HP" } },
       {
@@ -65,7 +66,6 @@ Use `prefab patch` for complex Prefab asset edits that need multiple operations 
 - `set_array`: Replace an array property.
 - `append_array`: Append items to an array property.
 - `clear_array`: Clear an array property.
-- `set_reference_collector`: Shortcut for replacing ReferenceCollector `data`.
 
 ## 引用写法
 
