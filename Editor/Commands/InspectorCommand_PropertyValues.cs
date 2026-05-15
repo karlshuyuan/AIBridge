@@ -11,6 +11,14 @@ namespace AIBridge.Editor
 {
     public partial class InspectorCommand
     {
+#if !UNITY_2021_1_OR_NEWER
+        // Unity 2019 下 gradientValue 对外不可见，这里集中用反射兜底，避免分散访问。
+        private static readonly System.Reflection.PropertyInfo GradientValueReflectionProperty =
+            typeof(SerializedProperty).GetProperty(
+                "gradientValue",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
+#endif
+
         private bool TryGetValuesDictionary(CommandRequest request, out Dictionary<string, object> values, out string error)
         {
             values = null;
@@ -139,7 +147,12 @@ namespace AIBridge.Editor
                         size = new { x = prop.boundsValue.size.x, y = prop.boundsValue.size.y, z = prop.boundsValue.size.z }
                     };
                 case SerializedPropertyType.Gradient:
-                    return BuildGradientValue(prop.gradientValue);
+                    if (!TryGetGradientPropertyValue(prop, out var gradientValue))
+                    {
+                        return null;
+                    }
+
+                    return BuildGradientValue(gradientValue);
                 case SerializedPropertyType.Quaternion:
                     return new { x = prop.quaternionValue.x, y = prop.quaternionValue.y, z = prop.quaternionValue.z, w = prop.quaternionValue.w };
                 case SerializedPropertyType.ExposedReference:
@@ -280,7 +293,13 @@ namespace AIBridge.Editor
                             error = "Expected Gradient as {colorKeys:[{time,color}],alphaKeys:[{time,alpha}],mode}";
                             return false;
                         }
-                        prop.gradientValue = gradientValue;
+
+                        if (!TrySetGradientPropertyValue(prop, gradientValue))
+                        {
+                            error = "Gradient property is not accessible in current Unity version.";
+                            return false;
+                        }
+
                         return true;
                     case SerializedPropertyType.Quaternion:
                         if (!TryGetQuaternion(value, out var quaternionValue))
@@ -385,6 +404,51 @@ namespace AIBridge.Editor
             }
 
             return false;
+        }
+
+        // 统一封装 Gradient 读取，避免业务分支直接依赖 Unity 版本差异。
+        private static bool TryGetGradientPropertyValue(SerializedProperty prop, out Gradient gradient)
+        {
+            gradient = null;
+            if (prop == null)
+            {
+                return false;
+            }
+
+#if UNITY_2021_1_OR_NEWER
+            gradient = prop.gradientValue;
+            return true;
+#else
+            if (GradientValueReflectionProperty == null || GradientValueReflectionProperty.GetGetMethod(true) == null)
+            {
+                return false;
+            }
+
+            gradient = GradientValueReflectionProperty.GetValue(prop, null) as Gradient;
+            return true;
+#endif
+        }
+
+        // 统一封装 Gradient 写入，低版本走反射，高版本保持直接赋值。
+        private static bool TrySetGradientPropertyValue(SerializedProperty prop, Gradient gradient)
+        {
+            if (prop == null)
+            {
+                return false;
+            }
+
+#if UNITY_2021_1_OR_NEWER
+            prop.gradientValue = gradient;
+            return true;
+#else
+            if (GradientValueReflectionProperty == null || GradientValueReflectionProperty.GetSetMethod(true) == null)
+            {
+                return false;
+            }
+
+            GradientValueReflectionProperty.SetValue(prop, gradient, null);
+            return true;
+#endif
         }
 
         private static object BuildObjectReferenceValue(UnityEngine.Object objectReference)
